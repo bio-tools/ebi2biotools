@@ -1,8 +1,9 @@
 # coding: utf-8
-
 import json
+import logging
 import unicodedata
 
+import argparse
 import requests
 
 EBI_COLLECTION = "EBI Tools"
@@ -30,6 +31,8 @@ EBI_LINKS = [{"type": ["Helpdesk"], "url": "http://www.ebi.ac.uk/support/"}]
 EBI_OS = ["Linux", "Windows", "Mac"]
 EBI_OWNER = "EMBL_EBI"
 
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+
 r = requests.get("https://www.ebi.ac.uk/sites/ebi.ac.uk/files/data/resource.json")
 
 
@@ -40,7 +43,8 @@ def norm_str(text):
     return unicodedata.normalize("NFKD", text.strip())
 
 
-def main(name_filter):
+def process(args):
+    name_filter = args.service
     biotools_entries = []
     for ebi_entry in [
         e["node"]
@@ -76,7 +80,22 @@ def main(name_filter):
         biotools_entry["owner"] = EBI_OWNER
         print(json.dumps(biotools_entry, indent=4, sort_keys=True))
         biotools_entries.append(biotools_entry)
-    print(f"Processed {len(biotools_entries)} EBI tools")
+    logging.info(f"Processed {len(biotools_entries)} EBI tools")
 
 
-main("EMBOSS needle")
+def main():
+    parser = argparse.ArgumentParser(prog="ebi2biotools")
+    parser.set_defaults(func=process)
+    parser.add_argument(
+        "--service",
+        required=False,
+        default=None,
+        help="process only one service with the name provided here"
+    )
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
+
