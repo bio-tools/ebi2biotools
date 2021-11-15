@@ -2,9 +2,11 @@
 import json
 import logging
 import unicodedata
-
+import glob
 import argparse
+
 import requests
+import pandas as pd
 
 EBI_COLLECTION = "EBI Tools"
 EMBOSS_EBI_COLLECTION = "EMBOSS at EBI Tools"
@@ -35,6 +37,15 @@ logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
 r = requests.get("https://www.ebi.ac.uk/sites/ebi.ac.uk/files/data/resource.json")
 
+BIOTOOLS_CONTENTS = []
+BIOTOOLS_BY_HOMEPAGE = {}
+
+def cache_biotools_contents():
+    for f in glob.glob("../content/data/*/*.biotools.json"):
+        entry = json.load(open(f))
+        BIOTOOLS_CONTENTS.append(entry)
+        BIOTOOLS_BY_HOMEPAGE[entry["homepage"]] = entry
+
 
 def norm_str(text):
     text = text.replace("\n", " ")
@@ -44,8 +55,10 @@ def norm_str(text):
 
 
 def process(args):
+    cache_biotools_contents()
     name_filter = args.service
     biotools_entries = []
+    ebi_entries = [e["node"] for e in r.json()["nodes"]]
     for ebi_entry in [
         e["node"]
         for e in r.json()["nodes"]
@@ -78,10 +91,34 @@ def process(args):
         biotools_entry["links"] = EBI_LINKS.copy()
         biotools_entry["operatingSystem"] = EBI_OS.copy()
         biotools_entry["owner"] = EBI_OWNER
-        print(json.dumps(biotools_entry, indent=4, sort_keys=True))
+        #print(json.dumps(biotools_entry, indent=4, sort_keys=True))
+        match = lookup_in_biotools(biotools_entry)
+        if match:
+            biotools_entry["biotoolsID_official"] = match["biotoolsID"]
+            biotools_entry["biotoolsID_collections"] = match.get("collectionID",[])
+            logging.info(f"{biotools_entry['name']}, {biotools_entry['homepage']}, ->, {match.get('biotoolsID','')}, {match.get('homepage','')}, {str(match.get('collectionID',''))}")
+        else:
+            biotools_entry["biotoolsID_official"] = None
+            biotools_entry["biotoolsID_collections"] = []
+            logging.info(f"{biotools_entry['name']}, {biotools_entry['homepage']}, -> NO MATCH")
         biotools_entries.append(biotools_entry)
-    logging.info(f"Processed {len(biotools_entries)} EBI tools")
+    kept_keys = ["biotoolsID", "homepage", "biotoolsID_official", "biotoolsID_collections"]
+    df_mapped = pd.DataFrame([{ key: bt_entry[key] for key in kept_keys} for bt_entry in biotools_entries])
+    mapped_ids = [bt["biotoolsID_official"] for bt in biotools_entries if bt["biotoolsID_official"]!=None]
+    df_nonmapped = pd.DataFrame([("", entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[])) for entry in BIOTOOLS_CONTENTS if EBI_COLLECTION in entry.get("collectionID",[]) and entry["biotoolsID"] not in mapped_ids])
+    df_nonmapped.columns = kept_keys
+    if args.summary_file:
+        pd.concat([df_mapped, df_nonmapped]).to_excel(args.summary_file, sheet_name="Sheet1", index=False)
+    logging.info(f"EBI tools:                  {len(biotools_entries):>5}")
+    logging.info(f"Bio.tools:                  {len(BIOTOOLS_CONTENTS):>5}")
+    logging.info(f"Matched tools:              {len([entry for entry in biotools_entries if 'biotoolsID_official' in entry.keys() and entry['biotoolsID_official']!=None]):>5}")
+    logging.info(f"Matched tools with col:     {len([entry for entry in biotools_entries if 'EBI Tools' in entry.get('biotoolsID_collections',[])]):>5}")
+    logging.info(f"Non-Matched tools with col: {len(df_nonmapped):>5}")
 
+def lookup_in_biotools(query_entry):
+    if query_entry["homepage"] in BIOTOOLS_BY_HOMEPAGE.keys():
+        return BIOTOOLS_BY_HOMEPAGE[query_entry["homepage"]]
+    return None
 
 def main():
     parser = argparse.ArgumentParser(prog="ebi2biotools")
@@ -91,6 +128,12 @@ def main():
         required=False,
         default=None,
         help="process only one service with the name provided here"
+    )
+    parser.add_argument(
+        "--summary-file",
+        required=False,
+        default=None,
+        help="File to summarize statistics obtained from the mapping"
     )
     args = parser.parse_args()
     args.func(args)
