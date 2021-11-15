@@ -95,17 +95,19 @@ def process(args):
         match = lookup_in_biotools(biotools_entry)
         if match:
             biotools_entry["biotoolsID_official"] = match["biotoolsID"]
+            biotools_entry["maturity"] = match.get("maturity", None)
             biotools_entry["biotoolsID_collections"] = match.get("collectionID",[])
             logging.info(f"{biotools_entry['name']}, {biotools_entry['homepage']}, ->, {match.get('biotoolsID','')}, {match.get('homepage','')}, {str(match.get('collectionID',''))}")
         else:
             biotools_entry["biotoolsID_official"] = None
+            biotools_entry["maturity"] = None
             biotools_entry["biotoolsID_collections"] = []
             logging.info(f"{biotools_entry['name']}, {biotools_entry['homepage']}, -> NO MATCH")
         biotools_entries.append(biotools_entry)
-    kept_keys = ["biotoolsID", "homepage", "biotoolsID_official", "biotoolsID_collections"]
+    kept_keys = ["biotoolsID", "homepage", "biotoolsID_official", "biotoolsID_collections", "maturity"]
     df_mapped = pd.DataFrame([{ key: bt_entry[key] for key in kept_keys} for bt_entry in biotools_entries])
     mapped_ids = [bt["biotoolsID_official"] for bt in biotools_entries if bt["biotoolsID_official"]!=None]
-    df_nonmapped = pd.DataFrame([("", entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[])) for entry in BIOTOOLS_CONTENTS if EBI_COLLECTION in entry.get("collectionID",[]) and entry["biotoolsID"] not in mapped_ids])
+    df_nonmapped = pd.DataFrame([("", entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[]), entry.get("maturity", None)) for entry in BIOTOOLS_CONTENTS if EBI_COLLECTION in entry.get("collectionID",[]) and entry["biotoolsID"] not in mapped_ids])
     df_nonmapped.columns = kept_keys
     if args.summary_file:
         pd.concat([df_mapped, df_nonmapped]).to_excel(args.summary_file, sheet_name="Sheet1", index=False)
