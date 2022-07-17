@@ -34,8 +34,9 @@ EBI_OS = ["Linux", "Windows", "Mac"]
 EBI_OWNER = "EMBL_EBI"
 
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
-
-r = requests.get("https://www.ebi.ac.uk/sites/ebi.ac.uk/files/data/resource.json")
+#url ="https://www.ebi.ac.uk/sites/ebi.ac.uk/files/data/resource.json"
+url = "https://www.ebi.ac.uk/api/v1/resources-all?source=contentdb"
+r = requests.get(url)
 
 BIOTOOLS_CONTENTS = []
 BIOTOOLS_BY_HOMEPAGE = {}
@@ -43,6 +44,7 @@ BIOTOOLS_BY_HOMEPAGE = {}
 def cache_biotools_contents():
     for f in glob.glob("../content/data/*/*.biotools.json"):
         entry = json.load(open(f))
+        entry['homepage'] = entry['homepage'].replace('http://','https://')
         BIOTOOLS_CONTENTS.append(entry)
         BIOTOOLS_BY_HOMEPAGE[entry["homepage"]] = entry
 
@@ -71,7 +73,7 @@ def process(args):
             ebi_entry["Title"] = ebi_entry["Title"][7:]
             biotools_entry["credits"].append(EMBOSS_CREDITS)
             biotools_entry["collectionID"].append(EMBOSS_EBI_COLLECTION)
-        tool_id = f"{ebi_entry['Title'].lower().replace(' ', '-')}_ebi"
+        tool_id = f"{ebi_entry['Title']}"
         tool_name = f"{ebi_entry['Title']} (EBI)"
         biotools_entry["name"] = tool_name
         biotools_entry["biotoolsID"] = tool_id
@@ -87,10 +89,11 @@ def process(args):
         ]
         # TODO function inputs and outputs
         biotools_entry["function"] = {"operation": edam_operations}
-        biotools_entry["homepage"] = ebi_entry["URL"]
+        biotools_entry["homepage"] = ebi_entry["URL"].replace('http://','https://')
         biotools_entry["links"] = EBI_LINKS.copy()
         biotools_entry["operatingSystem"] = EBI_OS.copy()
         biotools_entry["owner"] = EBI_OWNER
+        biotools_entry["ebi_nodeid"] = ebi_entry["Nid"] 
         #print(json.dumps(biotools_entry, indent=4, sort_keys=True))
         match = lookup_in_biotools(biotools_entry)
         if match:
@@ -104,18 +107,30 @@ def process(args):
             biotools_entry["biotoolsID_collections"] = []
             logging.info(f"{biotools_entry['name']}, {biotools_entry['homepage']}, -> NO MATCH")
         biotools_entries.append(biotools_entry)
-    kept_keys = ["biotoolsID", "homepage", "biotoolsID_official", "biotoolsID_collections", "maturity"]
+    kept_keys = ["biotoolsID", "homepage", "biotoolsID_official", "biotoolsID_collections", "maturity", "ebi_nodeid"]
     df_mapped = pd.DataFrame([{ key: bt_entry[key] for key in kept_keys} for bt_entry in biotools_entries])
     mapped_ids = [bt["biotoolsID_official"] for bt in biotools_entries if bt["biotoolsID_official"]!=None]
-    df_nonmapped = pd.DataFrame([("", entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[]), entry.get("maturity", None)) for entry in BIOTOOLS_CONTENTS if EBI_COLLECTION in entry.get("collectionID",[]) and entry["biotoolsID"] not in mapped_ids])
+    df_nonmapped = pd.DataFrame([("", entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[]), entry.get("maturity", None), entry.get("ebi_nodeid", None)) for entry in BIOTOOLS_CONTENTS if EBI_COLLECTION in entry.get("collectionID",[]) and entry["biotoolsID"] not in mapped_ids])
+    df_allbiotools = pd.DataFrame([(entry.get("homepage",None), entry["biotoolsID"], entry.get("collectionID",[]), entry.get("maturity", None)) for entry in BIOTOOLS_CONTENTS])
     df_nonmapped.columns = kept_keys
-    if args.summary_file:
-        pd.concat([df_mapped, df_nonmapped]).to_excel(args.summary_file, sheet_name="Sheet1", index=False)
     logging.info(f"EBI tools:                  {len(biotools_entries):>5}")
     logging.info(f"Bio.tools:                  {len(BIOTOOLS_CONTENTS):>5}")
     logging.info(f"Matched tools:              {len([entry for entry in biotools_entries if 'biotoolsID_official' in entry.keys() and entry['biotoolsID_official']!=None]):>5}")
     logging.info(f"Matched tools with col:     {len([entry for entry in biotools_entries if 'EBI Tools' in entry.get('biotoolsID_collections',[])]):>5}")
     logging.info(f"Non-Matched tools with col: {len(df_nonmapped):>5}")
+    if args.summary_file:
+        writer = pd.ExcelWriter(args.summary_file)
+        df_identified = pd.concat([df_mapped, df_nonmapped])
+        df_identified.rename(columns={"biotoolsID": "EBI", "homepage": "homepage", "biotoolsID_official":"bio.tools", "biotoolsID_collections":"collections"}, inplace=True)
+        df_identified = df_identified[['ebi_nodeid', 'EBI', 'bio.tools', 'homepage', 'collections', 'maturity']]
+        df_identified.to_excel(writer, sheet_name="EBI Identified", index=False)
+        #df_mapped.rename(columns={"biotoolsID": "Canonical bio.tools ID", "homepage": "homepage (in bio.tools; URL in EBI)", "biotoolsID_official":"Current bio.tools ID", "biotoolsID_collections":"collections"}, inplace=True)
+        #df_mapped.to_excel(writer, sheet_name="EBI Mapped entries", index=False)
+        #df_nonmapped.rename(columns={"biotoolsID": "Canonical bio.tools ID", "homepage": "homepage (in bio.tools; URL in EBI)", "biotoolsID_official":"Current bio.tools ID", "biotoolsID_collections":"collections"}, inplace=True)
+        #df_nonmapped.to_excel(writer, sheet_name="EBI Non-mapped entries", index=False)
+        #df_allbiotools.columns=["homepage (in bio.tools; URL in EBI)","Current bio.tools ID","collections","maturity"]
+        #df_allbiotools.to_excel(writer, sheet_name="All bio.tools", index=False)
+        writer.save()
 
 def lookup_in_biotools(query_entry):
     if query_entry["homepage"] in BIOTOOLS_BY_HOMEPAGE.keys():
