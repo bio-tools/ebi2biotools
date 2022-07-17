@@ -103,11 +103,36 @@ def process(args):
     logging.info(f"EBI tools:                  {len(ebi_entries):>5}")
     logging.info(f"Bio.tools:                  {len(BIOTOOLS_CONTENTS):>5}")
     logging.info(
-        f"Matched tools:              {len([entry for entry in ebi_entries_mapped if 'biotoolsID' in entry.keys() and entry['biotoolsID']!=None]):>5}"
+        f"Matched tools:              {len([entry for entry in ebi_entries_mapped if 'bio.tools ID' in entry.keys() and entry['bio.tools ID']!=None]):>5}"
     )
     logging.info(f"Non-Matched tools with col: {len(df_nonmapped):>5}")
     if args.summary_file:
         writer = pd.ExcelWriter(args.summary_file, engine='xlsxwriter')
+
+        workbook  = writer.book
+
+        instructions_sheet = workbook.add_worksheet("Instructions")
+        instructions_sheet.set_row(0, 150)
+        instructions_sheet.set_column('A:A', 2500)
+        instructions_format = workbook.add_format()
+        instructions_format.set_text_wrap()
+        bold = workbook.add_format({'bold': True})
+        text = [bold,
+                "Goal of this workbook\n",
+                "Link the existing entries of bio.tools entries to the contents database, to make sure we can synchronize the non-extinct EBI services between the EBI Contents DB and bio.tools\n",
+                bold,
+                "Where do the data of this workbook come from?\n",
+                f"The entries in the EBI-bio.tools worksheet were retrieved and merged from bio.tools and contents DB. They are a union of all contents DB entries (sometimes automatically mapped to a bio.tools ID using the URL for the service), and the bio.tools entries identified as EBI because they belonged to the \"{EBI_COLLECTION}\" collection even though no corresponding entry in contents DB was identified.\n",
+                bold,
+                "What to do with these lines?\n",
+                "- if a content DB entry has an bio.tools ID, do not do anything unless you judge it invalid.\n",
+                "- if a content DB entry does not have a bio.tools ID, decide or not whether we want to create one, and type requested ID in bold in column A\n",
+                "- if a bio.tools entry is not mapped to a content DB entry, suggest an existing content DB Nid in column B or specify other action in column Z"
+        ]
+        rc = instructions_sheet.write_rich_string("A1", *text, instructions_format)
+
+
+
         df_identified = pd.concat([df_mapped, df_nonmapped])
         df_identified = df_identified[
             [
@@ -139,17 +164,24 @@ def process(args):
             ]
         ]
         df_identified.to_excel(writer, sheet_name="EBI-bio.tools", index=False)
-        workbook  = writer.book
+        # add conditional formatting to the worksheet
         worksheet = writer.sheets["EBI-bio.tools"]
-        research_format = workbook.add_format({'bg_color': '#FFC7CE',
-                               'font_color': '#9C0006'})
-        # worksheet.conditional_format('I1:I1048576', {'type': 'cell',
-        #                                  'criteria': '==',
-        #                                  'value': 'Research',
-        #                                  'format': research_format})
-        worksheet.conditional_format('A1:Z1048576', {'type': 'formula',
-                                          'criteria': '=LEFT($I1, 8)="Research"',
+        research_format = workbook.add_format({'font_color': '#045D5D'})
+        worksheet.conditional_format('A2:Z1048576', {'type': 'formula',
+                                          'criteria': '=LEFT($I2, 8)="Research"',
                                           'format': research_format})
+        mapped_format = workbook.add_format({'bg_color': '#5cb85c'})
+        worksheet.conditional_format('A2:Z1048576', {'type': 'formula',
+                                          'criteria': '=AND($A2<>"",$D2<>"")',
+                                          'format': mapped_format})
+        ebi_unmapped_format = workbook.add_format({'bg_color': '#f0ad4e'})
+        worksheet.conditional_format('A2:Z1048576', {'type': 'formula',
+                                          'criteria': '=AND($A2="",$D2<>"")',
+                                          'format': ebi_unmapped_format})
+        biotools_unmapped_format = workbook.add_format({'bg_color': '#5bc0de'})
+        worksheet.conditional_format('A2:Z1048576', {'type': 'formula',
+                                          'criteria': '=AND($A2<>"",$D2="")',
+                                          'format': biotools_unmapped_format})
         writer.save()
 
 
